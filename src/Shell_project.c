@@ -26,12 +26,15 @@ int main(void)
 {
 	char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
 	int background;             /* equals 1 if a command is followed by '&' */
-	char *args[MAX_LINE/2];     /* command line (of 256) has max of 128 arguments */
+	char* args[MAX_LINE/2];     /* command line (of 256) has max of 128 arguments */
 	// probably useful variables:
 	int pid_fork, pid_wait; /* pid for created and waited process */
 	int status;             /* status returned by wait */
 	enum status status_res; /* status processed by analyze_status() */
 	int info;				/* info processed by analyze_status() */
+
+	// added variables:
+	int exec_success; // -1 if exec failed
 
 	while (1)   /* Program terminates normally inside get_command() after ^D is typed*/
 	{   		
@@ -40,13 +43,34 @@ int main(void)
 		get_command(inputBuffer, MAX_LINE, args, &background);  /* get next command */
 		
 		if(args[0]==NULL) continue;   // if empty command
-
+		
+		pid_fork = fork();
+		
+		if (pid_fork == 0) { // Child process running, need to change executable code
+			exec_success = execvp(args[0], args);
+			if (exec_success == -1) printf("Error, command not found: %s\n", args[0]);
+		} else {
+			if (!background) { // Command runs in foreground 
+				waitpid(pid_fork, &status, 0); // Wait for child process to finish
+				
+				status_res = analyze_status(status, &info);
+				
+				// Print info about child process (in foreground)
+				printf("Foreground pid: %d, command: %s, %s, info: %d\n", pid_fork, args[0], status_strings[status_res], info); 
+							
+			} else {
+				// Print info about child process (in background)
+				printf("Background job running... pid: %d, command: %s\n", pid_fork, args[0]);
+			}
+		}
+		
+		
 		/* the steps are:
 			 (1) fork a child process using fork()
 			 (2) the child process will invoke execvp()
 			 (3) if background == 0, the parent will wait, otherwise continue 
 			 (4) Shell shows a status message for processed command 
-			 (5) loop returns to get_commnad() function
+			 (5) loop returns to get_command() function
 		*/
 
 	} // end while
