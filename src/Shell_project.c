@@ -18,7 +18,33 @@ To compile and run the program:
 
 #define MAX_LINE 256 /* 256 chars per line, per command, should be enough. */
 
+job* job_list; // Job list with all processes ran in background
 
+void mySIGCHLD_Handler(int signum) {
+  job *current_node = job_list->next, *node_to_delete = NULL;
+  int process_status, process_id_deleted;
+
+  while (current_node) {
+
+    /* Wait for a child process to finish.
+    *    - WNOHANG: return immediately if no child has exited
+    */
+    waitpid(current_node->pgid, &process_status, WNOHANG);
+
+    if (WIFEXITED(process_status)) {
+      node_to_delete = current_node;
+      current_node = current_node->next;
+      process_id_deleted = node_to_delete->pgid;
+      if (delete_job(job_list, node_to_delete)) {
+        printf("Process #%d deleted from job list\n", process_id_deleted);
+      } else {
+        printf("Process #%d could not be deleted from job list\n", process_id_deleted);
+      }
+    } else {
+      current_node = current_node->next;
+    }
+  }
+}
 
 // -----------------------------------------------------------------------
 //                            MAIN
@@ -37,6 +63,9 @@ int main(void)
 
 	// added variables:
 	int exec_success; // -1 if exec failed
+  job_list = new_list("Shell tasks");
+
+  signal(SIGCHLD, mySIGCHLD_Handler);
 
 	while (1)   /* Program terminates normally inside get_command() after ^D is typed*/
 	{
@@ -71,7 +100,10 @@ int main(void)
 
 				pid_wait = getpid();
 
-				waitpid(pid_fork, &status, WUNTRACED); // Wait for child process to finish
+        /* Wait for a child process to finish.
+        *    - WUNTRACED: return if the child has stopped.
+        */
+				waitpid(pid_fork, &status, WUNTRACED);
 
 				set_terminal(pid_wait); // Return terminal control to main process
 
@@ -82,6 +114,8 @@ int main(void)
 									status_strings[status_res], info);
 
 			} else {
+        add_job(job_list, new_job(pid_fork, args[0], BACKGROUND));
+
 				// Print info about child process (in background)
 				printf("Background job running... pid: %d, command: %s\n", pid_fork, args[0]);
 			}
