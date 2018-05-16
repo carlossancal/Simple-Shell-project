@@ -8,8 +8,8 @@ Dept. Arquitectura de Computadores - UMA
 Some code adapted from "Fundamentos de Sistemas Operativos", Silberschatz et al.
 
 To compile and run the program:
-   $ gcc Shell_project.c job_control.c -o Shell
-   $ ./Shell
+   $ gcc Shell_project.c job_control.c -o Shell.test
+   $ ./Shell.test
 	(then type ^D to exit program)
 
 **/
@@ -21,29 +21,33 @@ To compile and run the program:
 job* job_list; // Job list with all processes ran in background
 
 void mySIGCHLD_Handler(int signum) {
-  job *current_node = job_list->next, *node_to_delete = NULL;
-  int process_status, process_id_deleted;
+  block_SIGCHLD();
+  if (signum == 17) {
+    job *current_node = job_list->next, *node_to_delete = NULL;
+    int process_status, process_id_deleted;
 
-  while (current_node) {
+    while (current_node) {
 
-    /* Wait for a child process to finish.
-    *    - WNOHANG: return immediately if no child has exited
-    */
-    waitpid(current_node->pgid, &process_status, WNOHANG);
+      /* Wait for a child process to finish.
+      *    - WNOHANG: return immediately if no child has exited
+      */
+      waitpid(current_node->pgid, &process_status, WNOHANG);
 
-    if (WIFEXITED(process_status)) {
-      node_to_delete = current_node;
-      current_node = current_node->next;
-      process_id_deleted = node_to_delete->pgid;
-      if (delete_job(job_list, node_to_delete)) {
-        printf("Process #%d deleted from job list\n", process_id_deleted);
+      if (WIFEXITED(process_status)) {
+        node_to_delete = current_node;
+        current_node = current_node->next;
+        process_id_deleted = node_to_delete->pgid;
+        if (delete_job(job_list, node_to_delete)) {
+          printf("Process #%d deleted from job list\n", process_id_deleted);
+        } else {
+          printf("Process #%d could not be deleted from job list\n", process_id_deleted);
+        }
       } else {
-        printf("Process #%d could not be deleted from job list\n", process_id_deleted);
+        current_node = current_node->next;
       }
-    } else {
-      current_node = current_node->next;
     }
   }
+  unblock_SIGCHLD();
 }
 
 // -----------------------------------------------------------------------
@@ -62,10 +66,11 @@ int main(void)
 	int info;				/* info processed by analyze_status() */
 
 	// added variables:
-	int exec_success; // -1 if exec failed
   job_list = new_list("Shell tasks");
 
   signal(SIGCHLD, mySIGCHLD_Handler);
+
+  ignore_terminal_signals();
 
 	while (1)   /* Program terminates normally inside get_command() after ^D is typed*/
 	{
@@ -75,7 +80,7 @@ int main(void)
 
 		if(args[0]==NULL) continue;   // if empty command
 
-		// Comprobación de comandos internos
+		// Intern command checking
 		if (strcmp("cd",args[0]) == 0) {
 			if (chdir(args[1]) != 0) // Incorrect path
 				printf("cd: Incorrect path '%s'\n", args[1]);
@@ -83,15 +88,12 @@ int main(void)
 			continue;
 		}
 
-		ignore_terminal_signals();
-
 		pid_fork = fork();
 
 		if (pid_fork == 0) { // Child process running, need to change executable code
 			restore_terminal_signals();
 
-			exec_success = execvp(args[0], args);
-			if (exec_success == -1) printf("Error, command not found: %s\n", args[0]);
+			if (execvp(args[0], args) == -1) printf("Error, command not found: %s\n", args[0]);
 		} else {
 			if (!background) { // Command runs in foreground
 				// New process group for new process and we give it terminal control
@@ -108,6 +110,10 @@ int main(void)
 				set_terminal(pid_wait); // Return terminal control to main process
 
 				status_res = analyze_status(status, &info);
+
+        if (WIFSTOPPED(status)) {
+          add_job(job_list, new_job(pid_fork, args[0], STOPPED));
+        }
 
 				// Print info about child process (in foreground)
 				printf("Foreground pid: %d, command: %s, %s, info: %d\n", pid_fork, args[0],
