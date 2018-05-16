@@ -22,29 +22,27 @@ job* job_list; // Job list with all processes ran in background
 
 void mySIGCHLD_Handler(int signum) {
   block_SIGCHLD();
-  if (signum == 17) {
-    job *current_node = job_list->next, *node_to_delete = NULL;
-    int process_status, process_id_deleted;
+  job *current_node = job_list->next, *node_to_delete = NULL;
+  int process_status, process_id_deleted, wait_status;
 
-    while (current_node) {
+  while (current_node) {
 
-      /* Wait for a child process to finish.
-      *    - WNOHANG: return immediately if no child has exited
-      */
-      waitpid(current_node->pgid, &process_status, WNOHANG);
+    /* Wait for a child process to finish.
+    *    - WNOHANG: return immediately if the process has not exited
+    */
+    wait_status = waitpid(current_node->pgid, &process_status, WNOHANG);
 
-      if (WIFEXITED(process_status)) {
-        node_to_delete = current_node;
-        current_node = current_node->next;
-        process_id_deleted = node_to_delete->pgid;
-        if (delete_job(job_list, node_to_delete)) {
-          printf("Process #%d deleted from job list\n", process_id_deleted);
-        } else {
-          printf("Process #%d could not be deleted from job list\n", process_id_deleted);
-        }
+    if (wait_status != 0 && WIFEXITED(process_status)) {
+      node_to_delete = current_node;
+      current_node = current_node->next;
+      process_id_deleted = node_to_delete->pgid;
+      if (delete_job(job_list, node_to_delete)) {
+        printf("Process #%d deleted from job list\n", process_id_deleted);
       } else {
-        current_node = current_node->next;
+        printf("Process #%d could not be deleted from job list\n", process_id_deleted);
       }
+    } else {
+      current_node = current_node->next;
     }
   }
   unblock_SIGCHLD();
