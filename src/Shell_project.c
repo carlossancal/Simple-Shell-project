@@ -29,8 +29,9 @@ void mySIGCHLD_Handler(int signum) {
 
     /* Wait for a child process to finish.
     *    - WNOHANG: return immediately if the process has not exited
+    *    - WUNTRACED: return if process has stopped
     */
-    wait_status = waitpid(current_node->pgid, &process_status, WNOHANG);
+    wait_status = waitpid(current_node->pgid, &process_status, WNOHANG|WUNTRACED);
 
     if (wait_status != 0 && WIFEXITED(process_status)) {
       node_to_delete = current_node;
@@ -41,6 +42,9 @@ void mySIGCHLD_Handler(int signum) {
       } else {
         printf("Process #%d could not be deleted from job list\n", process_id_deleted);
       }
+    } else if (wait_status != 0 && WIFSTOPPED(process_status)) {
+      current_node->state = STOPPED;
+      current_node = current_node->next;
     } else {
       current_node = current_node->next;
     }
@@ -64,6 +68,7 @@ int main(void)
 	int info;				/* info processed by analyze_status() */
 
 	// added variables:
+  job *tmp_job;
   job_list = new_list("Shell tasks");
 
   signal(SIGCHLD, mySIGCHLD_Handler);
@@ -84,7 +89,106 @@ int main(void)
 				printf("cd: Incorrect path '%s'\n", args[1]);
 
 			continue;
-		}
+
+		} else if (strcmp("jobs",args[0]) == 0) {
+      if (args[1] == NULL) {
+        if (empty_list(job_list)) {
+          printf("No processes in job list.\n");
+        } else {
+          block_SIGCHLD();
+          print_job_list(job_list);
+          unblock_SIGCHLD();
+        }
+      } else {
+        printf("ERROR - Usage: 'jobs'\n");
+      }
+
+      continue;
+
+    } else if (strcmp("fg",args[0]) == 0) {
+      // Get asked process and update status to FOREGROUND
+      block_SIGCHLD();
+      if (empty_list(job_list)) {
+        printf("No process to put in foreground...\n");
+        unblock_SIGCHLD();
+      } else {
+        if (args[1] == NULL) {
+          tmp_job = get_item_bypos(job_list, 1);
+        } else if (atoi(args[1]) > list_size(job_list)) {
+          printf("Process position in list greater than list size\n");
+          unblock_SIGCHLD();
+          continue;
+        } else {
+          tmp_job = get_item_bypos(job_list, atoi(args[1]));
+        }
+
+        tmp_job->state = FOREGROUND;
+        args[0] = tmp_job->command;
+        pid_fork = tmp_job->pgid; // We use 'pid_fork' for use not related to fork, just to store a pid
+        unblock_SIGCHLD();
+
+        // Put it in foreground and make it continue
+        set_terminal(pid_fork);
+        if (killpg(pid_fork, SIGCONT) != 0) { // Cannot make it continue
+          printf("Error restoring a process from suspension\n");
+          continue;
+        }
+
+        /* Wait for a child process to finish.
+        *    - WUNTRACED: return if the child has stopped.
+        */
+        waitpid(pid_fork, &status, WUNTRACED); // Wait that process to finish or be stopped
+
+        if (WIFSTOPPED(status)) { // If stopped, modify it from FOREGROUND to STOPPED
+          block_SIGCHLD();
+          tmp_job = get_item_bypid(job_list, pid_fork);
+          tmp_job->state = STOPPED;
+          unblock_SIGCHLD();
+        }
+
+        set_terminal(pid_wait); // Return terminal control to main process
+
+        status_res = analyze_status(status, &info);
+
+        // Print info about taken process
+        printf("Foreground pid: %d, command: %s, %s, info: %d\n", pid_fork, args[0],
+									status_strings[status_res], info);
+      }
+
+      continue;
+
+    } else if (strcmp("bg",args[0]) == 0) {
+      // Get asked process and update status to BACKGROUND
+      block_SIGCHLD();
+      if (empty_list(job_list)) {
+        printf("No process available to put in background\n");
+        unblock_SIGCHLD();
+      } else {
+        if (args[1] == NULL) {
+          tmp_job = get_item_bypos(job_list, 1);
+        } else if (atoi(args[1]) > list_size(job_list)) {
+          printf("Process position in list greater than list size\n");
+          unblock_SIGCHLD();
+          continue;
+        } else {
+          tmp_job = get_item_bypos(job_list, atoi(args[1]));
+        }
+        tmp_job->state = BACKGROUND;
+        args[0] = tmp_job->command;
+        pid_fork = tmp_job->pgid;
+        unblock_SIGCHLD();
+
+        if (killpg(pid_fork, SIGCONT) != 0) { // Put it in background
+          printf("Error restoring a process from suspension\n");
+        }
+
+        // Print info about taken process
+        printf("Background (from suspension) job running... pid: %d, command: %s\n", pid_fork, args[0]);
+      }
+
+      continue;
+
+    }
 
 		pid_fork = fork();
 
@@ -93,9 +197,9 @@ int main(void)
 
 			if (execvp(args[0], args) == -1) printf("Error, command not found: %s\n", args[0]);
 		} else {
+      new_process_group(pid_fork); // New process group for new process
 			if (!background) { // Command runs in foreground
-				// New process group for new process and we give it terminal control
-				new_process_group(pid_fork);
+				// Give foreground process terminal control
 				set_terminal(pid_fork);
 
 				pid_wait = getpid();
