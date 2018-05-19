@@ -30,11 +30,10 @@ void mySIGCHLD_Handler(int signum) {
     /* Wait for a child process to finish.
     *    - WNOHANG: return immediately if the process has not exited
     *    - WUNTRACED: return if process has stopped
-    *    - WCONTINUED: return if process has been resumed by delivery of SIGCONT
     */
-    wait_status = waitpid(current_node->pgid, &process_status, WNOHANG|WUNTRACED|WCONTINUED);
+    wait_status = waitpid(current_node->pgid, &process_status, WNOHANG|WUNTRACED);
 
-    if (wait_status != 0 && WIFEXITED(process_status)) {
+    if (wait_status != 0 && (WIFEXITED(process_status) || WIFSIGNALED(process_status))) {
       node_to_delete = current_node;
       current_node = current_node->next;
       process_id_deleted = node_to_delete->pgid;
@@ -128,8 +127,6 @@ int main(void)
         pid_fork = tmp_job->pgid; // We use 'pid_fork' for use not related to fork, just to store a pid
         unblock_SIGCHLD();
 
-        printf("Continued process: %d\n", pid_fork);
-
         // Put it in foreground and make it continue
         set_terminal(pid_fork);
         if (killpg(pid_fork, SIGCONT) != 0) { // Cannot make it continue
@@ -191,7 +188,7 @@ int main(void)
         }
 
         // Print info about taken process
-        printf("Continued job running in background... pid: %d, command: %s\n", pid_fork, args[0]);
+        printf("Background (from suspension) job running... pid: %d, command: %s\n", pid_fork, args[0]);
       }
 
       continue;
