@@ -173,6 +173,11 @@ int main(void)
         } else {
           tmp_job = get_item_bypos(job_list, atoi(args[1]));
         }
+        if (tmp_job->state == BACKGROUND) {
+          printf("Process #%d is already running in background\n", tmp_job->pgid);
+          unblock_SIGCHLD();
+          continue;
+        }
         tmp_job->state = BACKGROUND;
         args[0] = tmp_job->command;
         pid_fork = tmp_job->pgid;
