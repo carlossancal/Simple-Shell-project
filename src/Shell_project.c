@@ -70,6 +70,9 @@ int main(void)
 	// added variables:
   job *tmp_job;
   job_list = new_list("Shell tasks");
+  sigset_t signalsToBlock;
+  int masking = 0;
+  char *numberChecking;
 
   signal(SIGCHLD, mySIGCHLD_Handler);
 
@@ -193,6 +196,24 @@ int main(void)
 
       continue;
 
+    } else if (strcmp("mask", args[0]) == 0) {
+      if (args[1] == NULL || args[2] == NULL || args[3] == NULL) {
+        printf("mask: missing arguments, check input\n");
+        continue;
+      } else if (strtol(args[1], NULL, 10) != atoi(args[1])) {
+        printf("mask: signal error\n");
+        continue;
+      } else if (strcmp("-c", args[2]) != 0) {
+        printf("mask: command to run not found, maybe forgot to put '-c'?\n");
+        continue;
+      }
+
+      masking = 1;
+      sigemptyset(&signalsToBlock);
+      if (sigaddset(&signalsToBlock, atoi(args[1])) != 0) { // Error adding signal
+        printf("mask: signal '%s' not valid\n", args[1]);
+        continue;
+      }
     }
 
 		pid_fork = fork();
@@ -200,9 +221,18 @@ int main(void)
 		if (pid_fork == 0) { // Child process running, need to change executable code
 			restore_terminal_signals();
 
-			if (execvp(args[0], args) == -1) printf("Error, command not found: %s\n", args[0]);
+      if (masking) {
+        new_process_group(getpid()); // New process group for new process
+        sigprocmask(SIG_SETMASK, &signalsToBlock, NULL);
+
+        if (execvp(args[3], args+3) == -1) printf("Error, command not found: %s\n", args[3]);
+      } else {
+        if (execvp(args[0], args) == -1) printf("Error, command not found: %s\n", args[0]);
+      }
+
 		} else {
-      new_process_group(pid_fork); // New process group for new process
+      if (masking) masking = 0;
+
 			if (!background) { // Command runs in foreground
 				// Give foreground process terminal control
 				set_terminal(pid_fork);
