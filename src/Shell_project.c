@@ -68,6 +68,7 @@ int main(void)
 	int info;				/* info processed by analyze_status() */
 
 	// added variables:
+	job tmp_job2; // for storing a backup of node fg uses in its execution
   job *tmp_job;
   job_list = new_list("Shell tasks");
 
@@ -133,6 +134,14 @@ int main(void)
           printf("Error restoring a process from suspension\n");
           continue;
         }
+        
+        //Backup job node
+        block_SIGCHLD();
+          tmp_job = get_item_bypid(job_list, pid_fork);
+          tmp_job2.pgid = tmp_job->pgid;
+          tmp_job2.command = strdup(tmp_job->command);
+          tmp_job2.state = tmp_job->state;
+        unblock_SIGCHLD();
 
         /* Wait for a child process to finish.
         *    - WUNTRACED: return if the child has stopped.
@@ -140,11 +149,7 @@ int main(void)
         waitpid(pid_fork, &status, WUNTRACED); // Wait that process to finish or be stopped
 
         if (WIFSTOPPED(status)) { // If stopped, modify it from FOREGROUND to STOPPED
-          block_SIGCHLD();
-          tmp_job = get_item_bypid(job_list, pid_fork);
           tmp_job->state = STOPPED;
-          unblock_SIGCHLD();
-        }
 
         set_terminal(pid_wait); // Return terminal control to main process
 
@@ -153,6 +158,16 @@ int main(void)
         // Print info about taken process
         printf("Foreground pid: %d, command: %s, %s, info: %d\n", pid_fork, args[0],
 									status_strings[status_res], info);
+									
+        } else {
+			set_terminal(pid_wait); // Return terminal control to main process
+
+        status_res = analyze_status(status, &info);
+
+        // Print info about taken process
+        printf("Foreground pid: %d, command: %s, %s, info: %d\n", pid_fork, tmp_job2.command,
+									status_strings[status_res], info);
+		}
       }
 
       continue;
