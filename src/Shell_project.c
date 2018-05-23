@@ -67,12 +67,25 @@ int main(void)
 	enum status status_res; /* status processed by analyze_status() */
 	int info;				/* info processed by analyze_status() */
 
-	// added variables:
+	/*------------- ADDED VARIABLES -------------------*/
   job *tmp_job;
   job_list = new_list("Shell tasks");
+
+  // variables for 'mask' command
   sigset_t signalsToBlock;
   int masking = 0;
   char *numberChecking;
+
+  // variables for 'children' command
+  FILE *statFileProcess, *childrenProcesses, *fileMaxPID, *executableNameFile;
+  int max_pid, pid_children_command, num_children, tmp_ints[6], current_children;
+  unsigned long num_threads = 0;
+  char path[100], command_name[50], tmp_char, tmp_chars[50];
+  unsigned int tmp_unsigned;
+  unsigned long tmp_longs[6];
+  long int tmp_long_ints[6];
+
+  /*------------- - - - - - - - - -------------------*/
 
   signal(SIGCHLD, mySIGCHLD_Handler);
 
@@ -214,7 +227,79 @@ int main(void)
         printf("mask: signal '%s' not valid\n", args[1]);
         continue;
       }
-    }
+    } else if (strcmp("children", args[0]) == 0) {
+      if (args[1] != NULL) {
+        printf("Usage: 'children'\n");
+        continue;
+      }
+
+      /*
+        Anotaciones:
+         - En el fichero /proc/[pid]/stat tenemos los datos 'pid', 'command' y '#threads'
+         - En el fichero /proc/[pid]/task/[pid]/children tenemos los pids de los procesos
+           hijo del thread principal (contamos el numero de numeros en el fichero y eso es '#children')
+
+         - Para iterar por las carpetas de /proc buscando mostrar info x cada proceso,
+           en /proc/sys/kernel/pid_max hay un numero que es el máximo de procesos que se admiten por
+           sesion, por lo que cogemos ese numero e iteramos de 0 o 1 (segun como comience), hasta dicho numero
+           y vamos mostrando la info de cada proceso
+
+      */
+
+      if ((fileMaxPID = fopen("/proc/sys/kernel/pid_max", "rt")) == NULL) {
+        printf("children: Could not access '/proc/sys/kernel/pid_max'\n");
+      } else {
+        if (fscanf(fileMaxPID, "%d", &max_pid) != 1) {
+          printf("children: Could not read from '/proc/sys/kernel/pid_max'\n");
+          fclose(fileMaxPID);
+        } else {
+          fclose(fileMaxPID);
+
+          for (pid_children_command = 1; pid_children_command < max_pid; pid_children_command++) {
+           sprintf(path, "/proc/%d/stat", pid_children_command);
+           if ((statFileProcess = fopen(path, "rt")) == NULL) {
+             //printf("children: Could not access '/proc/%d/stat'\n", pid_children_command);
+             continue;
+           }
+           sprintf(path, "/proc/%d/task/%d/children", pid_children_command, pid_children_command);
+           if ((childrenProcesses = fopen(path, "rt")) == NULL) {
+             //printf("children: Could not access '/proc/%d/task/%d/children'\n", pid_children_command, pid_children_command);
+             fclose(statFileProcess);
+             continue;
+           }
+           sprintf(path, "/proc/%d/comm", pid_children_command);
+           if ((executableNameFile = fopen(path, "rt")) == NULL) {
+             //printf("children: Could not access '/proc/%d/task/%d/children'\n", pid_children_command, pid_children_command);
+             fclose(statFileProcess);
+             fclose(childrenProcesses);
+             continue;
+           }
+
+           fscanf(statFileProcess, "%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld", &tmp_ints[0], tmp_chars,
+                  &tmp_char, &tmp_ints[1], &tmp_ints[2], &tmp_ints[3], &tmp_ints[4], &tmp_ints[5], &tmp_unsigned, &tmp_longs[0], 
+                  &tmp_longs[1], &tmp_longs[2], &tmp_longs[3], &tmp_longs[4], &tmp_longs[5], &tmp_long_ints[0], &tmp_long_ints[1], 
+                  &tmp_long_ints[2], &tmp_long_ints[3], &num_threads);
+			
+			fscanf(executableNameFile, "%s", command_name);
+			
+		   while (fscanf(childrenProcesses, "%d ", &current_children) == 1) num_children++;
+		
+           printf("PID: %d, command: %s, #children: %d, #threads: %ld\n", pid_children_command, command_name, num_children, num_threads); //TODO
+           
+           num_children = 0;
+           fclose(statFileProcess);
+		   fclose(childrenProcesses);
+		   fclose(executableNameFile);
+          }
+          }
+			
+        }
+        continue;
+      }
+
+
+      
+    
 
 		pid_fork = fork();
 
@@ -225,9 +310,15 @@ int main(void)
         new_process_group(getpid()); // New process group for new process
         sigprocmask(SIG_SETMASK, &signalsToBlock, NULL);
 
-        if (execvp(args[3], args+3) == -1) printf("Error, command not found: %s\n", args[3]);
+        if (execvp(args[3], args+3) == -1) {
+			printf("Error, command not found: %s\n", args[3]);
+			return -1;
+		}
       } else {
-        if (execvp(args[0], args) == -1) printf("Error, command not found: %s\n", args[0]);
+        if (execvp(args[0], args) == -1) {
+			printf("Error, command not found: %s\n", args[0]);
+			return -1;
+		}
       }
 
 		} else {
